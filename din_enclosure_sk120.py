@@ -45,7 +45,6 @@ def generate_enclosure(c: SK120Config):
     # ============ Stair-step profile dimensions ============
     # LOW section: near DIN rail. Short and shallow.
     LOW_DEPTH = 15.0          # X extent of low section (rail side)
-    LOW_HEIGHT = EH * 0.55    # low section top is shorter than high section
 
     # HIGH section: holds boards + extends forward
     HIGH_DEPTH = sk.pcb_length + 2*CT + c.slot_depth + c.COVER_DEPTH
@@ -54,10 +53,14 @@ def generate_enclosure(c: SK120Config):
     # Step position
     STEP_X = LOW_DEPTH
 
-    # Full heights
+    # Full heights — enclosure centered at Y=0
     BOTTOM_Y = -EH/2
-    LOW_TOP_Y = -EH/2 + LOW_HEIGHT    # top of low section (the step)
-    HIGH_TOP_Y = EH/2                  # top of high section
+    HIGH_TOP_Y = EH/2
+
+    # LOW_TOP must clear the upper DIN rail notch (DIN_RAIL_UPPER = 17mm above center)
+    # so the back wall extends above the notch diagonal
+    LOW_TOP_Y = c.DIN_RAIL_UPPER + 3  # ~20mm above center
+    LOW_HEIGHT = LOW_TOP_Y - BOTTOM_Y  # total LOW section height
 
     # Board slot area starts after the step
     BOARD_AREA_X_START = STEP_X + CT
@@ -151,7 +154,7 @@ def generate_enclosure(c: SK120Config):
         .extrude(-CLIP_THICKNESS - 2*CLIP_GAP)
     )
     clip_cutout = clip_cutout.translate((-CLIP_THICKNESS/2 - CLIP_GAP,
-                                         -CLIP_CUTOUT_HEIGHT/2 - c.DIN_RAIL_LOWER + BOTTOM_Y,
+                                         -CLIP_CUTOUT_HEIGHT/2 - c.DIN_RAIL_LOWER,
                                          clip_z))
     clips = [clip]
 
@@ -193,11 +196,12 @@ def generate_enclosure(c: SK120Config):
     # ================================================================
 
     # Outer profile — the stair-step shape (XY cross-section)
+    # DIN rail notch uses absolute Y coords (centered at 0), same as original din_enclosure.py
     base_sketch_outer = (cq.Sketch()
-        # Start at bottom-back DIN rail notch, go clockwise
-        .segment((0, c.DIN_RAIL_UPPER + BOTTOM_Y), (-0.8, c.DIN_RAIL_UPPER + BOTTOM_Y))
-        .segment((-3.2, c.DIN_RAIL_UPPER - 3.2 + BOTTOM_Y))
-        .segment((BACK_WALL_X, c.DIN_RAIL_UPPER - 3.2 + BOTTOM_Y))
+        # Start at upper DIN rail notch (Y = DIN_RAIL_UPPER = +17)
+        .segment((0, c.DIN_RAIL_UPPER), (-0.8, c.DIN_RAIL_UPPER))
+        .segment((-3.2, c.DIN_RAIL_UPPER - 3.2))
+        .segment((BACK_WALL_X, c.DIN_RAIL_UPPER - 3.2))
         # Up back wall to LOW_TOP
         .segment((BACK_WALL_X, LOW_TOP_Y))
         # Across low top to the step
@@ -208,13 +212,12 @@ def generate_enclosure(c: SK120Config):
         .segment((TOTAL_DEPTH, HIGH_TOP_Y))
         # Down front wall
         .segment((TOTAL_DEPTH, BOTTOM_Y))
-        # Across bottom to back
+        # Across bottom to back wall
         .segment((BACK_WALL_X, BOTTOM_Y))
-        # Back wall lower DIN rail notch
-        .segment((BACK_WALL_X, -c.DIN_RAIL_LOWER + BOTTOM_Y + 3.2))
-        .segment((-3.2, -c.DIN_RAIL_LOWER + BOTTOM_Y + 3.2))
-        .segment((-0.8, -c.DIN_RAIL_LOWER + BOTTOM_Y))
-        .segment((0, -c.DIN_RAIL_LOWER + BOTTOM_Y))
+        # Up back wall to lower DIN rail notch (Y = -DIN_RAIL_LOWER = -18.7)
+        .segment((BACK_WALL_X, -c.DIN_RAIL_LOWER))
+        # Step to rail face
+        .segment((0, -c.DIN_RAIL_LOWER))
         .close()
         .assemble(tag="outerface")
         .edges("|Z" and "<X", tag="outerface")
