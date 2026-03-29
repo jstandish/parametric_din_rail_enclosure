@@ -97,3 +97,100 @@ class Config: # DO NOTY MODIFY !!! adapt corresponding entries in config.py
     LIGHT_CARRIER_DIAM:   float = LIGHT_GUIDE_DIAMETER+1.3
 
 
+# ============================= SK120 Card-Slot Enclosure Declarations =============================
+
+@dataclass
+class SK120Board:
+    """Headless XY-SK120X board for card-slot mounting (display removed)"""
+    pcb_width: float = 50.0       # along DIN rail (card slot width)
+    pcb_height: float = 81.0      # vertical insertion direction
+    component_depth: float = 40.0 # perpendicular to rail (component protrusion)
+    pcb_thickness: float = 1.6    # PCB edge thickness gripped by slot
+    slot_clearance: float = 0.3   # extra play in slot groove
+
+@dataclass
+class Fan:
+    """Parametric square fan cutout"""
+    size: float = 40.0            # fan width/height (25, 30, 40, 50, 60, 80mm)
+    screw_spacing: float = 32.0   # hole-to-hole distance
+    screw_diam: float = 3.2       # mounting screw hole diameter
+    depth: float = 10.0           # fan body thickness (for lid recess)
+
+@dataclass
+class ScrewTerminal:
+    """Green screw terminal block"""
+    pitch: float = 5.08           # pin-to-pin spacing
+    poles: int = 2                # number of poles
+    height: float = 8.5           # terminal block height
+    depth: float = 7.0            # how far it protrudes
+
+    @property
+    def width(self): return self.pitch * self.poles
+
+@dataclass
+class SK120Config:
+    CONFIG_NAME:        str = "sk120_3x"
+
+    # SK120 boards
+    sk120:    callable = field(default_factory=lambda: SK120Board())
+    num_boards:       int   = 3
+    board_spacing:    float = 3.0    # wall thickness between card slots
+
+    # Card slot guide
+    slot_depth:       float = 3.0    # how deep PCB edge sits in groove
+    slot_wall:        float = 2.0    # wall thickness of slot guide rails
+
+    # ESP32 section (at one end of enclosure)
+    esp32:    callable = field(default_factory=lambda: Board("top", board_width=18, length=24, thickness=2.0, usb_height=1.8, mount_height=1.5))
+    esp32_section_width: float = 30.0  # width along rail for ESP32 bay
+
+    # Fan (on lid, biased toward rear/DIN rail)
+    fan:      callable = field(default_factory=lambda: Fan())
+    fan_offset_from_rear: float = 5.0
+
+    # Power input (bottom) - single 2-pole green screw terminal
+    power_input:  callable = field(default_factory=lambda: ScrewTerminal(poles=2))
+    # Power output (top) - one 2-pole terminal per SK120 board
+    power_output: callable = field(default_factory=lambda: ScrewTerminal(poles=2))
+    # Internal WAGO 221 splitters (V+ and V-)
+    NR_WAGO_INTERNAL: int = 2
+
+    # Case
+    CASE_THICKNESS:     float = 2.0
+    BRAND:              str   = "@jstandish"
+    MODULE_NAME:        str   = "SK120x3"
+
+    # DIN rail standard dimensions
+    DIN_HEIGHT:         float = 82.0
+    DIN_NARROW_HEIGHT:  float = 45.0
+    DIN_RAIL_LOWER:     float = 18.7
+    DIN_RAIL_UPPER:     float = 17.0
+
+    # Screws
+    SCREW_HOLE_DIAM:    float = 3.0
+    SCREW_HEAD_DIAM:    float = 5.6
+    SCREW_HEAD_DEPTH:   float = 2.5
+    SCREW_INSERT_DIAM:  float = 4.3
+    SCREW_INSERT_DEPTH: float = 4.1
+    SCREW_HOLE_DEPTH:   float = 12.0
+    SCREW_BLOCK_SIZE:   float = 7.0
+    SCREW_LID_EXTRA:    float = 3.5
+
+    # WAGO (reused for internal splitters)
+    WAGO_OFFSET:        float = 7.88
+    WAGO_FIX_WIDTH:     float = 5.0
+    WAGO_HEIGHT:        float = 8.5
+    WAGO_LENGTH:        float = 35.0
+
+    @property
+    def enclosure_width(self):
+        """Total width along DIN rail"""
+        return (self.num_boards * self.sk120.pcb_width
+                + (self.num_boards + 1) * self.board_spacing
+                + self.esp32_section_width
+                + 2 * self.CASE_THICKNESS)
+
+    @property
+    def enclosure_depth(self):
+        """Depth perpendicular to DIN rail"""
+        return self.sk120.component_depth + 2 * self.CASE_THICKNESS + self.slot_depth
