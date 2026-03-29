@@ -98,6 +98,22 @@ class Config: # DO NOTY MODIFY !!! adapt corresponding entries in config.py
 
 
 # ============================= SK120 Card-Slot Enclosure Declarations =============================
+# Form factor: Bernic High/Low style (two-piece: base + front cover)
+#
+# Side profile (stair-step):
+#
+#        [6-port output terminals]
+#   ┌────────┬─────────────┐
+#   │ BASE   │ FRONT COVER │  ← cover compression-fits over base
+#   │ (low)  │ (high)      │     contains ESP32 electronics bay
+#   │ SK120  │             │
+#   │ boards │   fan       │
+#   │ in     │             │
+#   │ slots  │             │
+#   └────────┴─────────────┘
+#        [2-port input terminal]
+#   ══DIN RAIL══
+#   back(rail)    front→
 
 @dataclass
 class SK120Board:
@@ -135,29 +151,34 @@ class SK120Config:
     # SK120 boards
     sk120:    callable = field(default_factory=lambda: SK120Board())
     num_boards:       int   = 3
-    board_spacing:    float = 3.0    # wall thickness between card slots
+    board_spacing:    float = 3.0    # divider thickness between card slots
 
     # Card slot guide
     slot_depth:       float = 3.0    # how deep PCB edge sits in groove
     slot_wall:        float = 2.0    # wall thickness of slot guide rails
 
-    # ESP32 section (at top of enclosure, above SK120 stack)
+    # ESP32 section (in front cover electronics bay)
     esp32:    callable = field(default_factory=lambda: Board("top", board_width=18, length=24, thickness=2.0, usb_height=1.8, mount_height=1.5))
-    esp32_section_height: float = 30.0  # vertical height for ESP32 bay (Y axis)
 
-    # Fan (on lid, biased toward rear/DIN rail)
+    # Fan (on top of front cover, biased toward rear/DIN rail)
     fan:      callable = field(default_factory=lambda: Fan())
     fan_offset_from_rear: float = 5.0
 
     # Power input (bottom) - single 2-pole green screw terminal
     power_input:  callable = field(default_factory=lambda: ScrewTerminal(poles=2))
-    # Power output (top) - one 2-pole terminal per SK120 board
-    power_output: callable = field(default_factory=lambda: ScrewTerminal(poles=2))
+    # Power output (top) - 6-port (3 pairs of +/-) terminal block
+    power_output: callable = field(default_factory=lambda: ScrewTerminal(poles=6))
     # Internal WAGO 221 splitters (V+ and V-)
     NR_WAGO_INTERNAL: int = 2
 
-    # Case
+    # Base part dimensions
     CASE_THICKNESS:     float = 2.0
+    COMPRESSION_LIP:    float = 1.5   # lip height for compression fit
+    COMPRESSION_GAP:    float = 0.2   # clearance for compression fit
+
+    # Front cover (electronics bay) depth beyond base
+    COVER_DEPTH:        float = 30.0  # how far the front cover extends beyond the base
+
     BRAND:              str   = "@jstandish"
     MODULE_NAME:        str   = "SK120x3"
 
@@ -189,12 +210,17 @@ class SK120Config:
         return self.sk120.pcb_width + 2 * self.CASE_THICKNESS
 
     @property
-    def enclosure_depth(self):
-        """Depth perpendicular to DIN rail (X axis) — boards slide in this direction"""
+    def base_depth(self):
+        """Base depth from DIN rail (X axis) — holds SK120 boards"""
         return self.sk120.pcb_length + 2 * self.CASE_THICKNESS + self.slot_depth
+
+    @property
+    def total_depth(self):
+        """Total depth including front cover electronics bay"""
+        return self.base_depth + self.COVER_DEPTH
 
     @property
     def enclosure_height(self):
         """Total height (Y axis) — boards stacked vertically"""
         board_stack = self.num_boards * (self.sk120.component_height + self.sk120.pcb_thickness + self.board_spacing)
-        return board_stack + self.esp32_section_height + self.board_spacing + 2 * self.CASE_THICKNESS
+        return board_stack + self.board_spacing + 2 * self.CASE_THICKNESS

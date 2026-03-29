@@ -1,11 +1,10 @@
 """
 SK120 DIN Rail Card-Slot Enclosure Configuration
+Bernic High/Low form factor (two-piece: base + front cover)
 
-Houses 3 headless XY-SK120X DC-DC converters stacked horizontally,
-with ESP32 bay for ESPHome control, parametric fan mount (rear-biased on lid),
-and power distribution: DC input at bottom, outputs on front face.
-
-Layout: boards lie flat, stacked vertically, slide in from front.
+Base (low): DIN rail clip, 3 SK120 boards in horizontal card slots,
+  6-port output terminal (top), 2-port input terminal (bottom).
+Front cover (high): compression-fits over base, ESP32 electronics bay, fan.
 """
 
 import sys
@@ -26,23 +25,27 @@ config = SK120Config(
     num_boards=3,
     board_spacing=3.0,
 
-    # ESP32 for ESPHome control via JST serial (sits above board stack)
+    # ESP32 in front cover electronics bay
     esp32=Board("top",
                 board_width=18,
                 length=24,
                 thickness=2.0,
                 usb_height=1.8,
                 mount_height=1.5),
-    esp32_section_height=30.0,
 
-    # 40mm fan on lid, biased toward rear
-    fan=Fan(size=40, screw_spacing=32.0, screw_diam=3.2),
-    fan_offset_from_rear=5.0,
+    # 40mm fan on top of front cover, biased toward rear
+    fan=Fan(size=25, screw_spacing=20.0, screw_diam=3.2),
+    fan_offset_from_rear=2.0,
 
-    # Power: in at bottom, out on front face (DIN PSU convention)
+    # Power: 2-pole input (bottom), 6-port output (top) — 3 pairs +/-
     power_input=ScrewTerminal(pitch=5.08, poles=2),
-    power_output=ScrewTerminal(pitch=5.08, poles=2),
+    power_output=ScrewTerminal(pitch=5.08, poles=6),
     NR_WAGO_INTERNAL=2,  # V+ and V- splitters
+
+    # Front cover (electronics bay) extends 30mm beyond base
+    COVER_DEPTH=30.0,
+    COMPRESSION_LIP=1.5,
+    COMPRESSION_GAP=0.2,
 
     BRAND="@jstandish",
     MODULE_NAME="SK120x3",
