@@ -101,12 +101,13 @@ class Config: # DO NOTY MODIFY !!! adapt corresponding entries in config.py
 
 @dataclass
 class SK120Board:
-    """Headless XY-SK120X board for card-slot mounting (display removed)"""
-    pcb_width: float = 50.0       # along DIN rail (card slot width)
-    pcb_height: float = 81.0      # vertical insertion direction
-    component_depth: float = 40.0 # perpendicular to rail (component protrusion)
-    pcb_thickness: float = 1.6    # PCB edge thickness gripped by slot
-    slot_clearance: float = 0.3   # extra play in slot groove
+    """Headless XY-SK120X board for card-slot mounting (display removed).
+    Boards lie flat (horizontal), stacked vertically, slide in from front."""
+    pcb_width: float = 50.0        # narrow edge, along DIN rail (Z axis)
+    pcb_length: float = 81.0       # long edge, depth from rail (X axis, slide-in direction)
+    component_height: float = 20.0 # height of components above PCB when lying flat (Y axis)
+    pcb_thickness: float = 1.6     # PCB edge thickness gripped by slot
+    slot_clearance: float = 0.3    # extra play in slot groove
 
 @dataclass
 class Fan:
@@ -140,9 +141,9 @@ class SK120Config:
     slot_depth:       float = 3.0    # how deep PCB edge sits in groove
     slot_wall:        float = 2.0    # wall thickness of slot guide rails
 
-    # ESP32 section (at one end of enclosure)
+    # ESP32 section (at top of enclosure, above SK120 stack)
     esp32:    callable = field(default_factory=lambda: Board("top", board_width=18, length=24, thickness=2.0, usb_height=1.8, mount_height=1.5))
-    esp32_section_width: float = 30.0  # width along rail for ESP32 bay
+    esp32_section_height: float = 30.0  # vertical height for ESP32 bay (Y axis)
 
     # Fan (on lid, biased toward rear/DIN rail)
     fan:      callable = field(default_factory=lambda: Fan())
@@ -184,13 +185,16 @@ class SK120Config:
 
     @property
     def enclosure_width(self):
-        """Total width along DIN rail"""
-        return (self.num_boards * self.sk120.pcb_width
-                + (self.num_boards + 1) * self.board_spacing
-                + self.esp32_section_width
-                + 2 * self.CASE_THICKNESS)
+        """Total width along DIN rail (Z axis)"""
+        return self.sk120.pcb_width + 2 * self.CASE_THICKNESS
 
     @property
     def enclosure_depth(self):
-        """Depth perpendicular to DIN rail"""
-        return self.sk120.component_depth + 2 * self.CASE_THICKNESS + self.slot_depth
+        """Depth perpendicular to DIN rail (X axis) — boards slide in this direction"""
+        return self.sk120.pcb_length + 2 * self.CASE_THICKNESS + self.slot_depth
+
+    @property
+    def enclosure_height(self):
+        """Total height (Y axis) — boards stacked vertically"""
+        board_stack = self.num_boards * (self.sk120.component_height + self.sk120.pcb_thickness + self.board_spacing)
+        return board_stack + self.esp32_section_height + self.board_spacing + 2 * self.CASE_THICKNESS

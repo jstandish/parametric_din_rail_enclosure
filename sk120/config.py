@@ -1,9 +1,11 @@
 """
 SK120 DIN Rail Card-Slot Enclosure Configuration
 
-Houses 3 headless XY-SK120X DC-DC converters in vertical card slots,
+Houses 3 headless XY-SK120X DC-DC converters stacked horizontally,
 with ESP32 bay for ESPHome control, parametric fan mount (rear-biased on lid),
-and power distribution: DC input at bottom, outputs at top.
+and power distribution: DC input at bottom, outputs on front face.
+
+Layout: boards lie flat, stacked vertically, slide in from front.
 """
 
 import sys
@@ -15,29 +17,29 @@ config = SK120Config(
 
     # SK120 board dimensions (adjust after measuring bare board without display)
     sk120=SK120Board(
-        pcb_width=50.0,        # along DIN rail
-        pcb_height=81.0,       # vertical insertion
-        component_depth=40.0,  # perpendicular to rail
+        pcb_width=50.0,          # narrow edge along DIN rail (Z)
+        pcb_length=81.0,         # long edge, slide-in direction (X)
+        component_height=20.0,   # component height above PCB when flat (Y)
         pcb_thickness=1.6,
         slot_clearance=0.3,
     ),
     num_boards=3,
     board_spacing=3.0,
 
-    # ESP32 for ESPHome control via JST serial
+    # ESP32 for ESPHome control via JST serial (sits above board stack)
     esp32=Board("top",
                 board_width=18,
                 length=24,
                 thickness=2.0,
                 usb_height=1.8,
                 mount_height=1.5),
-    esp32_section_width=30.0,
+    esp32_section_height=30.0,
 
     # 40mm fan on lid, biased toward rear
     fan=Fan(size=40, screw_spacing=32.0, screw_diam=3.2),
     fan_offset_from_rear=5.0,
 
-    # Power: in at bottom, out at top (DIN PSU convention)
+    # Power: in at bottom, out on front face (DIN PSU convention)
     power_input=ScrewTerminal(pitch=5.08, poles=2),
     power_output=ScrewTerminal(pitch=5.08, poles=2),
     NR_WAGO_INTERNAL=2,  # V+ and V- splitters
