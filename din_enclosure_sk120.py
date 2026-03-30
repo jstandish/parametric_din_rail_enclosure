@@ -9,19 +9,23 @@
 #
 # Side profile (XY cross-section) — Bernic High/Low stair-step:
 #
-#    Y=HIGH_TOP ──────────────────┐
-#                                 │  HIGH section
-#                                 │  (BACK, near DIN rail)
-#    Y=LOW_TOP  ──────────────────┤  ← step DOWN here at X=STEP_X
-#               ┌─────────────────┘
-#               │  LOW section (FRONT)
-#    Y=BOTTOM   └──────────────────────────────
-#    ══DIN RAIL══
-#    X=0(rail)              X=STEP_X   X=TOTAL_DEPTH
+#    The LOW section is VERTICALLY CENTERED within the HIGH section.
+#    Step appears on BOTH top and bottom at X=STEP_X.
 #
-# HIGH section (back): SK120 boards in card slots, terminal blocks top+bottom
-# LOW section (front):  ESP32 bay + fan, compression-fit cover
-# DIN rail clip: behind back wall of HIGH section (correct Bernic position)
+#    Y=HIGH_TOP  ────────────────┐
+#                                │  HIGH section (BACK, DIN rail)
+#    Y=LOW_TOP   ────────────────┤  ← step DOWN (top)
+#                ┌───────────────┘
+#                │  LOW section (FRONT, centered)
+#                └───────────────┐
+#    Y=LOW_BOT   ────────────────┤  ← step UP (bottom)
+#                                │  HIGH section continues
+#    Y=HIGH_BOT  ────────────────┘
+#    ══DIN RAIL══
+#    X=0(rail)         X=STEP_X   X=TOTAL_DEPTH
+#
+# HIGH section (back): SK120 boards in card slots, terminal blocks, DIN clip
+# LOW section (front):  ESP32 bay + fan, compression-fit cover, centered
 # ==========================================================================================
 
 from din_declarations import *
@@ -34,77 +38,81 @@ import os
 
 def generate_enclosure(c: SK120Config):
     EW = c.enclosure_width    # Z (along rail)
-    EH = c.enclosure_height   # Y (vertical height)
+    EH = c.enclosure_height   # Y (vertical height of HIGH section)
     CT = c.CASE_THICKNESS
     sk = c.sk120
     CL = c.COMPRESSION_LIP
     CG = c.COMPRESSION_GAP
 
-    # ============ Stair-step profile dimensions (Bernic High/Low) ============
-    # HIGH section at BACK (DIN rail side): boards live here, full height
-    # LOW section at FRONT: shorter, cover compression-fits here
+    # ============ Stair-step profile (Bernic High/Low) ============
+    # HIGH section at BACK (DIN rail side): full height, holds boards
+    # LOW section at FRONT: vertically CENTERED, shorter, cover fits here
 
-    STEP_X    = sk.pcb_length + 2*CT + c.slot_depth  # end of HIGH section = board area
-    LOW_DEPTH = c.COVER_DEPTH                          # depth of LOW front section
+    STEP_X      = sk.pcb_length + 2*CT + c.slot_depth   # board area depth
+    LOW_DEPTH   = c.COVER_DEPTH                          # front section depth
     TOTAL_DEPTH = STEP_X + LOW_DEPTH
 
-    BOTTOM_Y  = -EH / 2
+    # HIGH section vertical extent (full height)
     HIGH_TOP_Y = EH / 2
-    LOW_TOP_Y  = HIGH_TOP_Y - 20.0   # step DOWN 20mm for visible Bernic profile
+    HIGH_BOT_Y = -EH / 2
+
+    # LOW section is centered vertically, with STEP_HEIGHT ledge on each side
+    STEP_HEIGHT = 10.0   # step on each side (top and bottom)
+    LOW_TOP_Y   = HIGH_TOP_Y - STEP_HEIGHT
+    LOW_BOT_Y   = HIGH_BOT_Y + STEP_HEIGHT
+    LOW_HEIGHT  = LOW_TOP_Y - LOW_BOT_Y
 
     BACK_WALL_X = -5
 
-    # Board area spans inside the HIGH section (X from CT to STEP_X)
+    # Board area in HIGH section
     BOARD_AREA_X_START = CT
-    BOARD_AREA_X_END   = STEP_X - CT   # leave wall thickness at step
+    BOARD_AREA_X_END   = STEP_X - CT
 
     print(f"Generating SK120 enclosure: {c.CONFIG_NAME}")
-    print(f"  Width along rail (Z):  {EW}mm")
-    print(f"  HIGH section depth (X):  {STEP_X}mm (back, DIN rail)")
-    print(f"  LOW section depth (X):   {LOW_DEPTH}mm (front, cover)")
-    print(f"  Total depth (X):         {TOTAL_DEPTH}mm")
-    print(f"  Height HIGH (Y):         {EH}mm")
-    print(f"  Height LOW  (Y):         {LOW_TOP_Y - BOTTOM_Y:.1f}mm")
-    print(f"  Step height:             {HIGH_TOP_Y - LOW_TOP_Y:.1f}mm")
+    print(f"  Width (Z):            {EW}mm")
+    print(f"  HIGH depth (X):       {STEP_X}mm (back/DIN rail)")
+    print(f"  LOW depth (X):        {LOW_DEPTH}mm (front/cover)")
+    print(f"  Total depth (X):      {TOTAL_DEPTH}mm")
+    print(f"  HIGH height (Y):      {EH}mm  ({HIGH_BOT_Y:.1f} to {HIGH_TOP_Y:.1f})")
+    print(f"  LOW height (Y):       {LOW_HEIGHT:.1f}mm  ({LOW_BOT_Y:.1f} to {LOW_TOP_Y:.1f})")
+    print(f"  Step (each side):     {STEP_HEIGHT}mm")
     print(cq.__version__)
 
     global base, cover, clips
 
-    # Board slot pitch: vertical space per board layer
+    # Board slot pitch
     board_layer_height = sk.component_height + sk.pcb_thickness + c.board_spacing
 
-    # Y positions of each board's PCB bottom (components face forward/+X)
+    # Y positions of each board's PCB bottom
     board_y_positions = []
     for i in range(c.num_boards):
-        y_bottom = BOTTOM_Y + CT + c.board_spacing + i * board_layer_height
+        y_bottom = HIGH_BOT_Y + CT + c.board_spacing + i * board_layer_height
         board_y_positions.append(y_bottom)
 
     # ======================== dummy object ==================
     dummy = cq.Workplane("XY").box(0.1, 0.1, 0.1).translate((-0.1, HIGH_TOP_Y - 10, 5))
 
     # ======================== DIN rail clip ==================
-    # Clip is behind back wall, at bottom — same as original din_enclosure.py
-    # Now correctly behind the HIGH section (matches Bernic design)
+    # Behind HIGH section back wall — same as original din_enclosure.py
 
-    CLIP_WIDTH        = EW - 2*CT - 0.2
-    CLIP_GAP          = 0.1
-    CLIP_THICKNESS    = 3.5
-    CLIP_SLOT_DEPTH   = CLIP_THICKNESS
+    CLIP_WIDTH         = EW - 2*CT - 0.2
+    CLIP_GAP           = 0.1
+    CLIP_THICKNESS     = 3.5
+    CLIP_SLOT_DEPTH    = CLIP_THICKNESS
     CLIP_HIDDEN_LENGTH = EH/2 - c.DIN_RAIL_LOWER + CLIP_SLOT_DEPTH
-    CLIP_TOP_HEIGHT   = 8
-    CLIP_LEG_WIDTH    = 2.6
-    CLIP_LEG_HEADROOM = 1
-    CLIP_LEG_RADIUS   = 1.2
-    CLIP_LEG_LENGTH   = CLIP_HIDDEN_LENGTH - CLIP_TOP_HEIGHT - CLIP_LEG_HEADROOM
+    CLIP_TOP_HEIGHT    = 8
+    CLIP_LEG_WIDTH     = 2.6
+    CLIP_LEG_HEADROOM  = 1
+    CLIP_LEG_RADIUS    = 1.2
+    CLIP_LEG_LENGTH    = CLIP_HIDDEN_LENGTH - CLIP_TOP_HEIGHT - CLIP_LEG_HEADROOM
     CLIP_LEG_GAP_WIDTH = 1.5
-    CLIP_BASE_HEIGHT  = 6
-    CLIP_CHAMFER      = 1.5
-    CLIP_UPPER_LOCK   = CLIP_TOP_HEIGHT - CLIP_SLOT_DEPTH + CLIP_LEG_HEADROOM + CLIP_LEG_RADIUS
+    CLIP_BASE_HEIGHT   = 6
+    CLIP_CHAMFER       = 1.5
+    CLIP_UPPER_LOCK    = CLIP_TOP_HEIGHT - CLIP_SLOT_DEPTH + CLIP_LEG_HEADROOM + CLIP_LEG_RADIUS
     CLIP_LOCK_DISTANCE = 5
-    CLIP_SLOT_WIDTH   = 1.4
-    CLIP_SLOT_TAPER   = 3
+    CLIP_SLOT_WIDTH    = 1.4
+    CLIP_SLOT_TAPER    = 3
     CLIP_CUTOUT_HEIGHT = EH/2 - c.DIN_RAIL_LOWER
-
     clip_z = EW / 2
 
     clip = (cq.Workplane("front")
@@ -131,7 +139,7 @@ def generate_enclosure(c: SK120Config):
         .rect(CLIP_WIDTH + 3, CLIP_SLOT_WIDTH)
         .extrude(-CLIP_SLOT_DEPTH, combine='s', taper=CLIP_SLOT_TAPER)
         .rotate((0, 0, 0), (0, 1, 0), 90)
-        .translate((-(CLIP_THICKNESS + CLIP_GAP), BOTTOM_Y, clip_z))
+        .translate((-(CLIP_THICKNESS + CLIP_GAP), HIGH_BOT_Y, clip_z))
     )
 
     clip_cutout = cq.Workplane("XY").box(CLIP_THICKNESS + 2*CLIP_GAP,
@@ -174,44 +182,45 @@ def generate_enclosure(c: SK120Config):
         wago_fix_cutout = wago_fix_cutout.rotate((0, 0, 0), (0, 1, 0), -90).translate((x, y, z))
         return wago_221_fix, wago_fix_cutout
 
-    # WAGOs inside HIGH section, near back wall, above bottom
     wago_x = CT + c.WAGO_HEIGHT + WAGO_FIX_HEIGHT/2
-    wago_y = BOTTOM_Y + CT + c.WAGO_FIX_WIDTH/2 + 1
+    wago_y = HIGH_BOT_Y + CT + c.WAGO_FIX_WIDTH/2 + 1
     wago_z = EW / 2
 
     if c.NR_WAGO_INTERNAL > 0:
         internal_wago_fix, internal_wago_fix_cutout = wago_fix(
             c.NR_WAGO_INTERNAL, wago_x, wago_y, wago_z)
     else:
-        internal_wago_fix       = dummy
+        internal_wago_fix        = dummy
         internal_wago_fix_cutout = dummy
 
     # ================================================================
     #                         BASE PART
-    # Stair-step profile: HIGH back + LOW front (Bernic form factor)
+    # Bernic High/Low: HIGH back + centered LOW front
+    # Step on BOTH top and bottom at X=STEP_X
     # ================================================================
 
-    # Outer profile — HIGH at back (DIN rail), step DOWN to LOW at front
     base_sketch_outer = (cq.Sketch()
-        # Start at upper DIN rail notch (Y = +DIN_RAIL_UPPER = +17)
+        # Start at upper DIN rail notch
         .segment((0, c.DIN_RAIL_UPPER), (-0.8, c.DIN_RAIL_UPPER))
         .segment((-3.2, c.DIN_RAIL_UPPER - 3.2))
         .segment((BACK_WALL_X, c.DIN_RAIL_UPPER - 3.2))
-        # Up back wall to HIGH top
+        # Up back wall to HIGH_TOP
         .segment((BACK_WALL_X, HIGH_TOP_Y))
         # Across HIGH top to step
         .segment((STEP_X, HIGH_TOP_Y))
-        # Step DOWN to LOW top
+        # Step DOWN on top to LOW_TOP
         .segment((STEP_X, LOW_TOP_Y))
         # Across LOW top to front
         .segment((TOTAL_DEPTH, LOW_TOP_Y))
-        # Down front wall
-        .segment((TOTAL_DEPTH, BOTTOM_Y))
-        # Across bottom to back wall
-        .segment((BACK_WALL_X, BOTTOM_Y))
-        # Up back wall to lower DIN rail notch (Y = -DIN_RAIL_LOWER = -18.7)
+        # Down front wall (LOW section height only)
+        .segment((TOTAL_DEPTH, LOW_BOT_Y))
+        # Step UP on bottom to HIGH_BOT (back to full height)
+        .segment((STEP_X, LOW_BOT_Y))
+        .segment((STEP_X, HIGH_BOT_Y))
+        # Across HIGH bottom to back wall
+        .segment((BACK_WALL_X, HIGH_BOT_Y))
+        # Up back wall to lower DIN rail notch
         .segment((BACK_WALL_X, -c.DIN_RAIL_LOWER))
-        # Step to rail face
         .segment((0, -c.DIN_RAIL_LOWER))
         .close()
         .assemble(tag="outerface")
@@ -220,13 +229,15 @@ def generate_enclosure(c: SK120Config):
         .clean()
     )
 
-    # Inner cavity — stair step inset by CT
+    # Inner cavity — follows the centered step
     base_sketch_inner = (cq.Sketch()
-        .segment((CT, BOTTOM_Y + CT), (CT, HIGH_TOP_Y - CT))       # back inside wall
-        .segment((STEP_X - CT, HIGH_TOP_Y - CT))                    # HIGH ceiling inside
-        .segment((STEP_X - CT, LOW_TOP_Y - CT))                     # step down inside
-        .segment((TOTAL_DEPTH - CT, LOW_TOP_Y - CT))                # LOW ceiling inside
-        .segment((TOTAL_DEPTH - CT, BOTTOM_Y + CT))                 # front inside wall
+        .segment((CT, HIGH_BOT_Y + CT), (CT, HIGH_TOP_Y - CT))       # back inside
+        .segment((STEP_X - CT, HIGH_TOP_Y - CT))                      # HIGH ceiling
+        .segment((STEP_X - CT, LOW_TOP_Y - CT))                       # step down (top)
+        .segment((TOTAL_DEPTH - CT, LOW_TOP_Y - CT))                   # LOW ceiling
+        .segment((TOTAL_DEPTH - CT, LOW_BOT_Y + CT))                   # front inside
+        .segment((STEP_X - CT, LOW_BOT_Y + CT))                       # step up (bottom)
+        .segment((STEP_X - CT, HIGH_BOT_Y + CT))                      # HIGH floor
         .close()
         .assemble(tag="innerface")
         .vertices()
@@ -238,12 +249,11 @@ def generate_enclosure(c: SK120Config):
     base_inner = cq.Workplane("XY", (0, 0, EW)).placeSketch(base_sketch_inner).extrude(-(EW - CT))
 
     # ======================== Card slot shelves and grooves ==================
-    # Boards are in the HIGH (back) section
+    # Boards in HIGH (back) section
 
-    slot_w     = sk.pcb_thickness + sk.slot_clearance
+    slot_w          = sk.pcb_thickness + sk.slot_clearance
     board_area_depth = BOARD_AREA_X_END - BOARD_AREA_X_START
 
-    # Horizontal divider shelves between board layers
     shelves = dummy
     for i in range(c.num_boards + 1):
         if i == 0:
@@ -259,47 +269,41 @@ def generate_enclosure(c: SK120Config):
             .translate((BOARD_AREA_X_START + board_area_depth/2, shelf_y, EW/2)))
         shelves = shelves.union(shelf)
 
-    # PCB edge grooves in left/right side walls of HIGH section
     slot_cutouts = dummy
     for i in range(c.num_boards):
         pcb_y = board_y_positions[i] + sk.pcb_thickness / 2
-
         left_groove = (cq.Workplane("XY")
             .box(board_area_depth, slot_w, c.slot_depth)
             .translate((BOARD_AREA_X_START + board_area_depth/2, pcb_y, CT + c.slot_depth/2)))
         right_groove = (cq.Workplane("XY")
             .box(board_area_depth, slot_w, c.slot_depth)
             .translate((BOARD_AREA_X_START + board_area_depth/2, pcb_y, EW - CT - c.slot_depth/2)))
-
         slot_cutouts = slot_cutouts.union(left_groove).union(right_groove)
 
     # ======================== Terminal block cutouts ==================
-    # Both terminals in HIGH section (boards live there)
 
     term_x_center = BOARD_AREA_X_START + board_area_depth / 2
 
-    # Top: 6-port output terminal (3 pairs +/-)
     po = c.power_output
     top_terminal_cutout = (cq.Workplane("XY")
         .box(po.depth + 2, CT + 2, po.width + 1)
         .translate((term_x_center, HIGH_TOP_Y, EW/2)))
 
-    # Bottom: 2-port input terminal
     pi = c.power_input
     bottom_terminal_cutout = (cq.Workplane("XY")
         .box(pi.depth + 2, CT + 2, pi.width + 1)
-        .translate((term_x_center, BOTTOM_Y, EW/2)))
+        .translate((term_x_center, HIGH_BOT_Y, EW/2)))
 
     # ======================== Compression fit lip ==================
-    # Raised lip on the step wall face (at X=STEP_X) — cover grabs this
-    # Lip protrudes forward (+X direction)
+    # Lip on the step wall face at X=STEP_X, centered on LOW section height
+    # Protrudes forward (+X) for cover to grip
 
-    lip_height = LOW_TOP_Y - BOTTOM_Y - 2*CT - 2*CG
+    lip_height = LOW_HEIGHT - 2*CT - 2*CG
     lip_width  = EW - 2*CT - 2*CG
     compression_lip = (cq.Workplane("XY")
         .box(CL, lip_height, lip_width)
         .translate((STEP_X + CL/2,
-                    (LOW_TOP_Y + BOTTOM_Y)/2,
+                    (LOW_TOP_Y + LOW_BOT_Y)/2,    # centered on LOW section
                     EW/2)))
 
     # ======================== Side ventilation (HIGH section) ==================
@@ -325,7 +329,6 @@ def generate_enclosure(c: SK120Config):
 
     # ======================== Text ==================
 
-    # Brand on back wall face
     text_brand = (cq.Workplane("YZ", (BACK_WALL_X, 0, EW/2))
         .text(c.BRAND, 5, -0.3))
     if c.MODULE_NAME:
@@ -352,19 +355,15 @@ def generate_enclosure(c: SK120Config):
 
     # ================================================================
     #                       FRONT COVER (LOW section)
-    # Compression-fits onto the LOW front section of the base.
-    # Contains ESP32 electronics bay and fan mount.
-    # Back of cover butts against the step wall at X=STEP_X.
+    # Compression-fits onto the centered LOW front section.
+    # Back of cover butts against step wall at X=STEP_X.
+    # Cover spans from LOW_BOT_Y to LOW_TOP_Y vertically.
     # ================================================================
 
-    # Cover wraps the LOW section: from STEP_X to TOTAL_DEPTH, BOTTOM to LOW_TOP
     cover_sketch_outer = (cq.Sketch()
-        # Back wall of cover (sits against step wall, with CG gap)
-        .segment((STEP_X + CG, BOTTOM_Y), (STEP_X + CG, LOW_TOP_Y + CT))
-        # Top wall
+        .segment((STEP_X + CG, LOW_BOT_Y - CT), (STEP_X + CG, LOW_TOP_Y + CT))
         .segment((TOTAL_DEPTH + CT, LOW_TOP_Y + CT))
-        # Front wall
-        .segment((TOTAL_DEPTH + CT, BOTTOM_Y))
+        .segment((TOTAL_DEPTH + CT, LOW_BOT_Y - CT))
         .close()
         .assemble(tag="coverout")
         .vertices()
@@ -373,10 +372,10 @@ def generate_enclosure(c: SK120Config):
     )
 
     cover_sketch_inner = (cq.Sketch()
-        .segment((STEP_X + CG + CT, BOTTOM_Y + CT),
+        .segment((STEP_X + CG + CT, LOW_BOT_Y),
                  (STEP_X + CG + CT, LOW_TOP_Y))
         .segment((TOTAL_DEPTH, LOW_TOP_Y))
-        .segment((TOTAL_DEPTH, BOTTOM_Y + CT))
+        .segment((TOTAL_DEPTH, LOW_BOT_Y))
         .close()
         .assemble(tag="coverin")
         .vertices()
@@ -388,29 +387,29 @@ def generate_enclosure(c: SK120Config):
     cover_inner = (cq.Workplane("XY", (0, 0, EW + 2*CT))
         .placeSketch(cover_sketch_inner).extrude(-(EW + 2*CT - CT)))
 
-    # Shift side walls to wrap outside the base walls
+    # Side walls wrap outside base
     cover_outer = cover_outer.translate((0, 0, -CT))
     cover_inner = cover_inner.translate((0, 0, -CT))
 
-    # Compression channel inside cover back wall — grips the lip on base step wall
+    # Compression channel — grips lip on step wall
     comp_channel = (cq.Workplane("XY")
         .box(CL + CG*2, lip_height - CG, EW - 2*CT)
         .translate((STEP_X + CG + CL/2,
-                    (LOW_TOP_Y + BOTTOM_Y)/2,
+                    (LOW_TOP_Y + LOW_BOT_Y)/2,
                     EW/2)))
 
-    # ESP32 mounting inside cover (near bottom of LOW section)
-    esp32_mount_y = BOTTOM_Y + CT + 3
+    # ESP32 mounting inside cover
+    esp32_mount_y = LOW_BOT_Y + CT + 3
     esp32_carriers = (cq.Workplane("XY")
         .pushPoints([
-            (STEP_X + CG + CT + 5,  esp32_mount_y + 1),
-            (STEP_X + CG + CT + 5,  esp32_mount_y + c.esp32.length - 1)
+            (STEP_X + CG + CT + 5, esp32_mount_y + 1),
+            (STEP_X + CG + CT + 5, esp32_mount_y + c.esp32.length - 1)
         ])
         .rect(7, 2)
         .extrude(c.esp32.mount_height)
         .translate((0, 0, EW/2 - c.esp32.board_width/2)))
 
-    # USB cutout on front face of cover
+    # USB cutout on front face
     USB_W = 9.3
     USB_H = 3.3
     if c.esp32.usb_height is not None:
@@ -429,7 +428,7 @@ def generate_enclosure(c: SK120Config):
     else:
         usb_cutout = dummy
 
-    # Fan on top of cover, biased toward rear (toward STEP_X)
+    # Fan on top of cover (LOW section top), biased toward rear
     fan_x = STEP_X + CG + CT + c.fan_offset_from_rear + c.fan.size/2
     fan_z = EW / 2
     low_section_x_span = TOTAL_DEPTH - STEP_X - 2*CT
@@ -451,11 +450,11 @@ def generate_enclosure(c: SK120Config):
         fan_cutout       = dummy
         fan_screw_cutout = dummy
 
-    # Front face ventilation slots (aligned with board levels)
+    # Front face ventilation
     cover_vents = dummy
     for bi in range(c.num_boards):
         vy = board_y_positions[bi] + sk.pcb_thickness + sk.component_height/2
-        if vy < LOW_TOP_Y:   # only vent boards within LOW section height
+        if LOW_BOT_Y < vy < LOW_TOP_Y:
             vent = (cq.Workplane("XY")
                 .box(CT + 2, sk.component_height * 0.4, VENT_WIDTH)
                 .translate((TOTAL_DEPTH + CT, vy, EW/2)))
