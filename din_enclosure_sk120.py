@@ -62,6 +62,24 @@ def generate_enclosure(c: SK120Config):
     LOW_BOT_Y   = HIGH_BOT_Y + STEP_HEIGHT
     LOW_HEIGHT  = LOW_TOP_Y - LOW_BOT_Y
 
+    # LOW section has 3 compartments (bottom to top):
+    #   Bottom: input terminal block (2-port)
+    #   Middle: ESP32 electronics bay
+    #   Top:    output terminal block (6-port)
+    TERM_COMP_HEIGHT = 12.0   # height of each terminal compartment
+    LOW_INNER = LOW_HEIGHT - 2*CT
+    ESP32_COMP_HEIGHT = LOW_INNER - 2*TERM_COMP_HEIGHT - 2*CT  # middle gets remainder
+
+    # Compartment Y boundaries (inside LOW section)
+    COMP_BOT_BOT  = LOW_BOT_Y + CT                               # bottom comp floor
+    COMP_BOT_TOP  = COMP_BOT_BOT + TERM_COMP_HEIGHT              # bottom comp ceiling
+    DIVIDER_BOT_Y = COMP_BOT_TOP                                  # bottom divider starts
+    COMP_MID_BOT  = DIVIDER_BOT_Y + CT                            # middle comp floor
+    COMP_MID_TOP  = COMP_MID_BOT + ESP32_COMP_HEIGHT              # middle comp ceiling
+    DIVIDER_TOP_Y = COMP_MID_TOP                                   # top divider starts
+    COMP_TOP_BOT  = DIVIDER_TOP_Y + CT                             # top comp floor
+    COMP_TOP_TOP  = LOW_TOP_Y - CT                                 # top comp ceiling
+
     BACK_WALL_X = -5
 
     # Board area in HIGH section
@@ -76,6 +94,7 @@ def generate_enclosure(c: SK120Config):
     print(f"  HIGH height (Y):      {EH}mm  ({HIGH_BOT_Y:.1f} to {HIGH_TOP_Y:.1f})")
     print(f"  LOW height (Y):       {LOW_HEIGHT:.1f}mm  ({LOW_BOT_Y:.1f} to {LOW_TOP_Y:.1f})")
     print(f"  Step (each side):     {STEP_HEIGHT}mm")
+    print(f"  LOW compartments:     bot={TERM_COMP_HEIGHT}mm, mid={ESP32_COMP_HEIGHT:.1f}mm, top={TERM_COMP_HEIGHT}mm")
     print(cq.__version__)
 
     global base, cover, clips
@@ -280,31 +299,52 @@ def generate_enclosure(c: SK120Config):
             .translate((BOARD_AREA_X_START + board_area_depth/2, pcb_y, EW - CT - c.slot_depth/2)))
         slot_cutouts = slot_cutouts.union(left_groove).union(right_groove)
 
-    # ======================== Terminal block cutouts ==================
+    # ======================== LOW section divider walls ==================
+    # Two horizontal walls separating the 3 compartments in the LOW section
+    # Span from step wall (STEP_X) to front wall (TOTAL_DEPTH-CT), full width
 
-    term_x_center = BOARD_AREA_X_START + board_area_depth / 2
+    low_divider_depth = TOTAL_DEPTH - STEP_X - CT   # X span inside LOW section
+    low_divider_x     = STEP_X + low_divider_depth/2 + CT/2
 
-    po = c.power_output
-    top_terminal_cutout = (cq.Workplane("XY")
-        .box(po.depth + 2, CT + 2, po.width + 1)
-        .translate((term_x_center, HIGH_TOP_Y, EW/2)))
+    divider_bottom = (cq.Workplane("XY")
+        .box(low_divider_depth, CT, EW - 2*CT)
+        .translate((low_divider_x, DIVIDER_BOT_Y + CT/2, EW/2)))
 
-    pi = c.power_input
-    bottom_terminal_cutout = (cq.Workplane("XY")
-        .box(pi.depth + 2, CT + 2, pi.width + 1)
-        .translate((term_x_center, HIGH_BOT_Y, EW/2)))
+    divider_top = (cq.Workplane("XY")
+        .box(low_divider_depth, CT, EW - 2*CT)
+        .translate((low_divider_x, DIVIDER_TOP_Y + CT/2, EW/2)))
+
+    # ======================== Wire pass-through channels ==================
+    # Rectangular openings in the step wall at X=STEP_X connecting HIGH → each LOW compartment
+    PASSTHROUGH_W = 20.0    # Z width of channel
+    PASSTHROUGH_H = 8.0     # Y height of channel
+
+    wire_passthrough = dummy
+    for comp_bot, comp_top in [(COMP_BOT_BOT, COMP_BOT_TOP),
+                                (COMP_MID_BOT, COMP_MID_TOP),
+                                (COMP_TOP_BOT, COMP_TOP_TOP)]:
+        comp_center_y = (comp_bot + comp_top) / 2
+        ch = (cq.Workplane("XY")
+            .box(CT + 2, PASSTHROUGH_H, PASSTHROUGH_W)
+            .translate((STEP_X, comp_center_y, EW/2)))
+        wire_passthrough = wire_passthrough.union(ch)
 
     # ======================== Compression fit lip ==================
-    # Lip on the step wall face at X=STEP_X, centered on LOW section height
+    # One lip per compartment on the step wall face at X=STEP_X
     # Protrudes forward (+X) for cover to grip
 
-    lip_height = LOW_HEIGHT - 2*CT - 2*CG
-    lip_width  = EW - 2*CT - 2*CG
-    compression_lip = (cq.Workplane("XY")
-        .box(CL, lip_height, lip_width)
-        .translate((STEP_X + CL/2,
-                    (LOW_TOP_Y + LOW_BOT_Y)/2,    # centered on LOW section
-                    EW/2)))
+    lip_width = EW - 2*CT - 2*CG
+    compression_lip = dummy
+    for comp_bot, comp_top in [(COMP_BOT_BOT, COMP_BOT_TOP),
+                                (COMP_MID_BOT, COMP_MID_TOP),
+                                (COMP_TOP_BOT, COMP_TOP_TOP)]:
+        seg_h = (comp_top - comp_bot) - 2*CG
+        lip_seg = (cq.Workplane("XY")
+            .box(CL, seg_h, lip_width)
+            .translate((STEP_X + CL/2,
+                        (comp_bot + comp_top)/2,
+                        EW/2)))
+        compression_lip = compression_lip.union(lip_seg)
 
     # ======================== Side ventilation (HIGH section) ==================
 
@@ -343,11 +383,12 @@ def generate_enclosure(c: SK120Config):
         .cut(clip_cutout)
         .union(shelves)
         .cut(slot_cutouts)
+        .union(divider_bottom)
+        .union(divider_top)
+        .cut(wire_passthrough)
         .union(compression_lip)
         .union(internal_wago_fix)
         .cut(internal_wago_fix_cutout)
-        .cut(top_terminal_cutout)
-        .cut(bottom_terminal_cutout)
         .cut(base_vents)
         .cut(text_brand)
         .cut(text_name)
@@ -391,15 +432,36 @@ def generate_enclosure(c: SK120Config):
     cover_outer = cover_outer.translate((0, 0, -CT))
     cover_inner = cover_inner.translate((0, 0, -CT))
 
-    # Compression channel — grips lip on step wall
-    comp_channel = (cq.Workplane("XY")
-        .box(CL + CG*2, lip_height - CG, EW - 2*CT)
-        .translate((STEP_X + CG + CL/2,
-                    (LOW_TOP_Y + LOW_BOT_Y)/2,
-                    EW/2)))
+    # Compression channels — one per compartment, grips lip segments
+    comp_channel = dummy
+    for comp_bot, comp_top in [(COMP_BOT_BOT, COMP_BOT_TOP),
+                                (COMP_MID_BOT, COMP_MID_TOP),
+                                (COMP_TOP_BOT, COMP_TOP_TOP)]:
+        seg_h = (comp_top - comp_bot) - CG
+        ch = (cq.Workplane("XY")
+            .box(CL + CG*2, seg_h, EW - 2*CT)
+            .translate((STEP_X + CG + CL/2,
+                        (comp_bot + comp_top)/2,
+                        EW/2)))
+        comp_channel = comp_channel.union(ch)
 
-    # ESP32 mounting inside cover
-    esp32_mount_y = LOW_BOT_Y + CT + 3
+    # ======================== Terminal block cutouts on cover front face ==================
+    # Bottom compartment: 2-port input terminal
+    pi = c.power_input
+    input_term_y = (COMP_BOT_BOT + COMP_BOT_TOP) / 2
+    input_terminal_cutout = (cq.Workplane("XY")
+        .box(CT + 2, pi.height + 1, pi.width + 1)
+        .translate((TOTAL_DEPTH + CT, input_term_y, EW/2)))
+
+    # Top compartment: 6-port output terminal
+    po = c.power_output
+    output_term_y = (COMP_TOP_BOT + COMP_TOP_TOP) / 2
+    output_terminal_cutout = (cq.Workplane("XY")
+        .box(CT + 2, po.height + 1, po.width + 1)
+        .translate((TOTAL_DEPTH + CT, output_term_y, EW/2)))
+
+    # ESP32 mounting inside cover — in MIDDLE compartment
+    esp32_mount_y = COMP_MID_BOT + 2
     esp32_carriers = (cq.Workplane("XY")
         .pushPoints([
             (STEP_X + CG + CT + 5, esp32_mount_y + 1),
@@ -466,6 +528,8 @@ def generate_enclosure(c: SK120Config):
         .cut(comp_channel)
         .union(esp32_carriers)
         .cut(usb_cutout)
+        .cut(input_terminal_cutout)
+        .cut(output_terminal_cutout)
         .cut(fan_cutout)
         .cut(fan_screw_cutout)
         .cut(cover_vents)
