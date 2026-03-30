@@ -273,7 +273,12 @@ def generate_enclosure(c: SK120Config):
     slot_w          = sk.pcb_thickness + sk.slot_clearance
     board_area_depth = BOARD_AREA_X_END - BOARD_AREA_X_START
 
+    # Shelves extend from Z=CT to Z=EW so they reach the cover side panel
+    shelf_z_width = EW - CT
+    shelf_z_center = CT + shelf_z_width / 2
+
     shelves = dummy
+    shelf_y_positions = []   # track for cover dado grooves
     for i in range(c.num_boards + 1):
         if i == 0:
             shelf_y = board_y_positions[0] - c.board_spacing / 2
@@ -283,36 +288,38 @@ def generate_enclosure(c: SK120Config):
             shelf_y = (board_y_positions[i-1] + sk.pcb_thickness + sk.component_height
                        + board_y_positions[i]) / 2
 
+        shelf_y_positions.append(shelf_y)
         shelf = (cq.Workplane("XY")
-            .box(board_area_depth, c.board_spacing, EW - 2*CT)
-            .translate((BOARD_AREA_X_START + board_area_depth/2, shelf_y, EW/2)))
+            .box(board_area_depth, c.board_spacing, shelf_z_width)
+            .translate((BOARD_AREA_X_START + board_area_depth/2, shelf_y, shelf_z_center)))
         shelves = shelves.union(shelf)
 
+    # Left-side PCB slot grooves (in base left wall)
     slot_cutouts = dummy
     for i in range(c.num_boards):
         pcb_y = board_y_positions[i] + sk.pcb_thickness / 2
         left_groove = (cq.Workplane("XY")
             .box(board_area_depth, slot_w, c.slot_depth)
             .translate((BOARD_AREA_X_START + board_area_depth/2, pcb_y, CT + c.slot_depth/2)))
-        right_groove = (cq.Workplane("XY")
-            .box(board_area_depth, slot_w, c.slot_depth)
-            .translate((BOARD_AREA_X_START + board_area_depth/2, pcb_y, EW - CT - c.slot_depth/2)))
-        slot_cutouts = slot_cutouts.union(left_groove).union(right_groove)
+        slot_cutouts = slot_cutouts.union(left_groove)
 
     # ======================== LOW section divider walls ==================
     # Two horizontal walls separating the 3 compartments in the LOW section
     # Span from step wall (STEP_X) to front wall (TOTAL_DEPTH-CT), full width
 
+    # Dividers extend from Z=CT to Z=EW (reach cover side panel)
     low_divider_depth = TOTAL_DEPTH - STEP_X - CT   # X span inside LOW section
     low_divider_x     = STEP_X + low_divider_depth/2 + CT/2
+    divider_z_width   = EW - CT
+    divider_z_center  = CT + divider_z_width / 2
 
     divider_bottom = (cq.Workplane("XY")
-        .box(low_divider_depth, CT, EW - 2*CT)
-        .translate((low_divider_x, DIVIDER_BOT_Y + CT/2, EW/2)))
+        .box(low_divider_depth, CT, divider_z_width)
+        .translate((low_divider_x, DIVIDER_BOT_Y + CT/2, divider_z_center)))
 
     divider_top = (cq.Workplane("XY")
-        .box(low_divider_depth, CT, EW - 2*CT)
-        .translate((low_divider_x, DIVIDER_TOP_Y + CT/2, EW/2)))
+        .box(low_divider_depth, CT, divider_z_width)
+        .translate((low_divider_x, DIVIDER_TOP_Y + CT/2, divider_z_center)))
 
     # ======================== Wire pass-through channels ==================
     # Rectangular openings in the step wall at X=STEP_X connecting HIGH → each LOW compartment
@@ -437,16 +444,6 @@ def generate_enclosure(c: SK120Config):
         fan_cutout       = dummy
         fan_screw_cutout = dummy
 
-    # ======================== Cover screw inserts in base front wall ==================
-    COVER_SCREW_DIAM = 3.0
-    cover_screw_y_positions = [LOW_BOT_Y + CT + 3, LOW_TOP_Y - CT - 3]
-    base_screw_inserts = dummy
-    for sy in cover_screw_y_positions:
-        hole = (cq.Workplane("XY", (TOTAL_DEPTH + 0.1, sy, EW/2))
-            .circle(c.SCREW_INSERT_DIAM / 2)
-            .extrude(-c.SCREW_INSERT_DEPTH))
-        base_screw_inserts = base_screw_inserts.union(hole)
-
     # ======================== Text ==================
 
     text_brand = (cq.Workplane("YZ", (BACK_WALL_X, 0, EW/2))
@@ -478,60 +475,86 @@ def generate_enclosure(c: SK120Config):
         .cut(base_vents)
         .cut(text_brand)
         .cut(text_name)
-        .cut(base_screw_inserts)
     )
 
     # ================================================================
-    #                       FRONT COVER (flat plate)
-    # Simple flat plate covering the open LOW section front face.
-    # Attaches at X=TOTAL_DEPTH, spans LOW_BOT_Y to LOW_TOP_Y + margins.
-    # All terminal cutouts, ESP32, fan are on the base part.
+    #                    SIDE COVER (stair-step profile)
+    # Matches the base XY profile, covers the open Z=EW side.
+    # Has dado grooves where shelves and dividers key in for support.
     # ================================================================
 
-    cover_height = LOW_TOP_Y - LOW_BOT_Y + 2*CT  # covers full LOW opening with overlap
-    cover = (cq.Workplane("XY")
-        .box(CT, cover_height, EW)
-        .translate((TOTAL_DEPTH + CT/2, (LOW_TOP_Y + LOW_BOT_Y)/2, EW/2)))
+    # Cover uses the same stair-step profile as the base outer wall
+    cover_sketch = (cq.Sketch()
+        .segment((0, c.DIN_RAIL_UPPER), (-0.8, c.DIN_RAIL_UPPER))
+        .segment((-3.2, c.DIN_RAIL_UPPER - 3.2))
+        .segment((BACK_WALL_X, c.DIN_RAIL_UPPER - 3.2))
+        .segment((BACK_WALL_X, HIGH_TOP_Y))
+        .segment((STEP_X, HIGH_TOP_Y))
+        .segment((STEP_X, LOW_TOP_Y))
+        .segment((TOTAL_DEPTH, LOW_TOP_Y))
+        .segment((TOTAL_DEPTH, LOW_BOT_Y))
+        .segment((STEP_X, LOW_BOT_Y))
+        .segment((STEP_X, HIGH_BOT_Y))
+        .segment((BACK_WALL_X, HIGH_BOT_Y))
+        .segment((BACK_WALL_X, -c.DIN_RAIL_LOWER))
+        .segment((0, -c.DIN_RAIL_LOWER))
+        .close()
+        .assemble(tag="coverface")
+        .vertices()
+        .fillet(0.5)
+        .clean()
+    )
 
-    # Matching terminal cutouts on cover plate (for terminal access)
-    cover_input_cutout = (cq.Workplane("XY")
-        .box(CT + 2, pi.height + 1, pi.width + 1)
-        .translate((TOTAL_DEPTH + CT/2, input_term_y, EW/2)))
-    cover_output_cutout = (cq.Workplane("XY")
-        .box(CT + 2, po.height + 1, po.width + 1)
-        .translate((TOTAL_DEPTH + CT/2, output_term_y, EW/2)))
+    cover = (cq.Workplane("XY", (0, 0, EW))
+        .placeSketch(cover_sketch)
+        .extrude(CT))
 
-    # Matching USB cutout on cover plate
-    if c.esp32.usb_height is not None:
-        cover_usb_cutout = (cq.Workplane("ZY",
-            (TOTAL_DEPTH + CT + 0.1,
-             esp32_mount_y + c.esp32.length/2,
-             EW/2))
-            .moveTo(0, USB_H/2)
-            .hLine(USB_W/2 - USB_H/2)
-            .threePointArc((USB_W/2, 0), (USB_W/2 - USB_H/2, -USB_H/2))
-            .hLine(-USB_W + USB_H)
-            .threePointArc((-USB_W/2, 0), (-USB_W/2 + USB_H/2, USB_H/2))
-            .hLine(USB_W/2 - USB_H/2)
-            .close()
-            .extrude(-CT - 1))
-    else:
-        cover_usb_cutout = dummy
+    # Dado grooves for HIGH section shelves — structural support for SK120 boards
+    DADO_DEPTH = 1.2   # depth of groove into cover (Z direction, from inner face)
+    cover_dados = dummy
 
-    # Cover screw holes (pass-through for screws into base inserts)
+    for shelf_y in shelf_y_positions:
+        dado = (cq.Workplane("XY")
+            .box(board_area_depth, c.board_spacing + 0.2, DADO_DEPTH)
+            .translate((BOARD_AREA_X_START + board_area_depth/2, shelf_y, EW + CT - DADO_DEPTH/2)))
+        cover_dados = cover_dados.union(dado)
+
+    # Dado grooves for LOW section dividers
+    for div_y in [DIVIDER_BOT_Y + CT/2, DIVIDER_TOP_Y + CT/2]:
+        dado = (cq.Workplane("XY")
+            .box(low_divider_depth, CT + 0.2, DADO_DEPTH)
+            .translate((low_divider_x, div_y, EW + CT - DADO_DEPTH/2)))
+        cover_dados = cover_dados.union(dado)
+
+    # Right-side PCB slot grooves (in cover, matching left grooves in base)
+    cover_slot_cutouts = dummy
+    for i in range(c.num_boards):
+        pcb_y = board_y_positions[i] + sk.pcb_thickness / 2
+        right_groove = (cq.Workplane("XY")
+            .box(board_area_depth, slot_w, c.slot_depth)
+            .translate((BOARD_AREA_X_START + board_area_depth/2, pcb_y, EW + CT - c.slot_depth/2)))
+        cover_slot_cutouts = cover_slot_cutouts.union(right_groove)
+
+    # Cover screw holes for attachment (4 screws at corners of HIGH section)
+    COVER_SCREW_DIAM = 3.0
+    cover_screw_positions = [
+        (BOARD_AREA_X_START + 5, HIGH_BOT_Y + CT + 3),
+        (BOARD_AREA_X_START + 5, HIGH_TOP_Y - CT - 3),
+        (STEP_X + 10, LOW_BOT_Y + CT + 3),
+        (STEP_X + 10, LOW_TOP_Y - CT - 3),
+    ]
     cover_screw_holes = dummy
-    for sy in cover_screw_y_positions:
-        hole = (cq.Workplane("XY", (TOTAL_DEPTH + CT + 0.1, sy, EW/2))
+    for sx, sy in cover_screw_positions:
+        hole = (cq.Workplane("XY", (sx, sy, EW - 0.1))
             .circle(COVER_SCREW_DIAM / 2)
-            .extrude(-CT - 2))
+            .extrude(CT + 1))
         cover_screw_holes = cover_screw_holes.union(hole)
 
     # ======================== Build COVER ==================
 
     cover = (cover
-        .cut(cover_input_cutout)
-        .cut(cover_output_cutout)
-        .cut(cover_usb_cutout)
+        .cut(cover_dados)
+        .cut(cover_slot_cutouts)
         .cut(cover_screw_holes)
     )
 
