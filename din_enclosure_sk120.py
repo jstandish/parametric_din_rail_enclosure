@@ -329,22 +329,23 @@ def generate_enclosure(c: SK120Config):
             .translate((STEP_X, comp_center_y, EW/2)))
         wire_passthrough = wire_passthrough.union(ch)
 
-    # ======================== Compression fit lip ==================
-    # One lip per compartment on the step wall face at X=STEP_X
-    # Protrudes forward (+X) for cover to grip
+    # ======================== Wire gutters in HIGH section ==================
+    # Shallow channels along the left side wall of the HIGH section,
+    # routing wires from each step-wall pass-through back into the board area.
+    GUTTER_DEPTH  = 3.0    # carved into side wall (Z direction)
+    GUTTER_WIDTH  = 8.0    # Y direction
+    GUTTER_LENGTH = STEP_X - CT - 10  # X direction, from near step wall back into board area
 
-    lip_width = EW - 2*CT - 2*CG
-    compression_lip = dummy
+    wire_gutters = dummy
     for comp_bot, comp_top in [(COMP_BOT_BOT, COMP_BOT_TOP),
                                 (COMP_MID_BOT, COMP_MID_TOP),
                                 (COMP_TOP_BOT, COMP_TOP_TOP)]:
-        seg_h = (comp_top - comp_bot) - 2*CG
-        lip_seg = (cq.Workplane("XY")
-            .box(CL, seg_h, lip_width)
-            .translate((STEP_X + CL/2,
-                        (comp_bot + comp_top)/2,
-                        EW/2)))
-        compression_lip = compression_lip.union(lip_seg)
+        comp_center_y = (comp_bot + comp_top) / 2
+        # Left side gutter
+        gutter = (cq.Workplane("XY")
+            .box(GUTTER_LENGTH, GUTTER_WIDTH, GUTTER_DEPTH)
+            .translate((STEP_X - GUTTER_LENGTH/2, comp_center_y, CT + GUTTER_DEPTH/2)))
+        wire_gutters = wire_gutters.union(gutter)
 
     # ======================== Side ventilation (HIGH section) ==================
 
@@ -367,6 +368,85 @@ def generate_enclosure(c: SK120Config):
                 .translate((vx, vy, EW)))
             base_vents = base_vents.union(vent_l).union(vent_r)
 
+    # ======================== Terminal block cutouts on base front face ==================
+    # Cut through the base front wall at X=TOTAL_DEPTH for screw terminal access
+
+    # Bottom compartment: 2-port input terminal
+    pi = c.power_input
+    input_term_y = (COMP_BOT_BOT + COMP_BOT_TOP) / 2
+    input_terminal_cutout = (cq.Workplane("XY")
+        .box(CT + 2, pi.height + 1, pi.width + 1)
+        .translate((TOTAL_DEPTH, input_term_y, EW/2)))
+
+    # Top compartment: 6-port output terminal
+    po = c.power_output
+    output_term_y = (COMP_TOP_BOT + COMP_TOP_TOP) / 2
+    output_terminal_cutout = (cq.Workplane("XY")
+        .box(CT + 2, po.height + 1, po.width + 1)
+        .translate((TOTAL_DEPTH, output_term_y, EW/2)))
+
+    # ======================== ESP32 mounting in base middle compartment ==================
+    esp32_mount_y = COMP_MID_BOT + 2
+    esp32_carriers = (cq.Workplane("XY")
+        .pushPoints([
+            (STEP_X + CT + 5, esp32_mount_y + 1),
+            (STEP_X + CT + 5, esp32_mount_y + c.esp32.length - 1)
+        ])
+        .rect(7, 2)
+        .extrude(c.esp32.mount_height)
+        .translate((0, 0, EW/2 - c.esp32.board_width/2)))
+
+    # USB cutout on base front face (middle compartment)
+    USB_W = 9.3
+    USB_H = 3.3
+    if c.esp32.usb_height is not None:
+        usb_cutout = (cq.Workplane("ZY",
+            (TOTAL_DEPTH,
+             esp32_mount_y + c.esp32.length/2,
+             EW/2))
+            .moveTo(0, USB_H/2)
+            .hLine(USB_W/2 - USB_H/2)
+            .threePointArc((USB_W/2, 0), (USB_W/2 - USB_H/2, -USB_H/2))
+            .hLine(-USB_W + USB_H)
+            .threePointArc((-USB_W/2, 0), (-USB_W/2 + USB_H/2, USB_H/2))
+            .hLine(USB_W/2 - USB_H/2)
+            .close()
+            .extrude(-CT - 1, taper=-30))
+    else:
+        usb_cutout = dummy
+
+    # ======================== Fan cutout on base LOW section top ==================
+    fan_x = STEP_X + CT + c.fan_offset_from_rear + c.fan.size/2
+    fan_z = EW / 2
+    low_section_x_span = TOTAL_DEPTH - STEP_X - 2*CT
+
+    can_fit_fan = (c.fan.size <= low_section_x_span and c.fan.size <= EW - 2*CT)
+    if can_fit_fan:
+        fan_cutout = (cq.Workplane("XY", (fan_x, LOW_TOP_Y, fan_z))
+            .rect(c.fan.size, c.fan.size)
+            .extrude(-CT - 2))
+        fan_screw_cutout = dummy
+        hs = c.fan.screw_spacing / 2
+        for dx in [-hs, hs]:
+            for dz in [-hs, hs]:
+                hole = (cq.Workplane("XY", (fan_x + dx, LOW_TOP_Y + 0.1, fan_z + dz))
+                    .circle(c.fan.screw_diam / 2)
+                    .extrude(-CT - 2))
+                fan_screw_cutout = fan_screw_cutout.union(hole)
+    else:
+        fan_cutout       = dummy
+        fan_screw_cutout = dummy
+
+    # ======================== Cover screw inserts in base front wall ==================
+    COVER_SCREW_DIAM = 3.0
+    cover_screw_y_positions = [LOW_BOT_Y + CT + 3, LOW_TOP_Y - CT - 3]
+    base_screw_inserts = dummy
+    for sy in cover_screw_y_positions:
+        hole = (cq.Workplane("XY", (TOTAL_DEPTH + 0.1, sy, EW/2))
+            .circle(c.SCREW_INSERT_DIAM / 2)
+            .extrude(-c.SCREW_INSERT_DEPTH))
+        base_screw_inserts = base_screw_inserts.union(hole)
+
     # ======================== Text ==================
 
     text_brand = (cq.Workplane("YZ", (BACK_WALL_X, 0, EW/2))
@@ -386,97 +466,45 @@ def generate_enclosure(c: SK120Config):
         .union(divider_bottom)
         .union(divider_top)
         .cut(wire_passthrough)
-        .union(compression_lip)
+        .cut(wire_gutters)
+        .union(esp32_carriers)
+        .cut(usb_cutout)
+        .cut(input_terminal_cutout)
+        .cut(output_terminal_cutout)
+        .cut(fan_cutout)
+        .cut(fan_screw_cutout)
         .union(internal_wago_fix)
         .cut(internal_wago_fix_cutout)
         .cut(base_vents)
         .cut(text_brand)
         .cut(text_name)
+        .cut(base_screw_inserts)
     )
 
     # ================================================================
-    #                       FRONT COVER (LOW section)
-    # Compression-fits onto the centered LOW front section.
-    # Back of cover butts against step wall at X=STEP_X.
-    # Cover spans from LOW_BOT_Y to LOW_TOP_Y vertically.
+    #                       FRONT COVER (flat plate)
+    # Simple flat plate covering the open LOW section front face.
+    # Attaches at X=TOTAL_DEPTH, spans LOW_BOT_Y to LOW_TOP_Y + margins.
+    # All terminal cutouts, ESP32, fan are on the base part.
     # ================================================================
 
-    cover_sketch_outer = (cq.Sketch()
-        .segment((STEP_X + CG, LOW_BOT_Y - CT), (STEP_X + CG, LOW_TOP_Y + CT))
-        .segment((TOTAL_DEPTH + CT, LOW_TOP_Y + CT))
-        .segment((TOTAL_DEPTH + CT, LOW_BOT_Y - CT))
-        .close()
-        .assemble(tag="coverout")
-        .vertices()
-        .fillet(1.0)
-        .clean()
-    )
+    cover_height = LOW_TOP_Y - LOW_BOT_Y + 2*CT  # covers full LOW opening with overlap
+    cover = (cq.Workplane("XY")
+        .box(CT, cover_height, EW)
+        .translate((TOTAL_DEPTH + CT/2, (LOW_TOP_Y + LOW_BOT_Y)/2, EW/2)))
 
-    cover_sketch_inner = (cq.Sketch()
-        .segment((STEP_X + CG + CT, LOW_BOT_Y),
-                 (STEP_X + CG + CT, LOW_TOP_Y))
-        .segment((TOTAL_DEPTH, LOW_TOP_Y))
-        .segment((TOTAL_DEPTH, LOW_BOT_Y))
-        .close()
-        .assemble(tag="coverin")
-        .vertices()
-        .fillet(0.6)
-        .clean()
-    )
-
-    cover_outer = cq.Workplane("XY").placeSketch(cover_sketch_outer).extrude(EW + 2*CT)
-    cover_inner = (cq.Workplane("XY", (0, 0, EW + 2*CT))
-        .placeSketch(cover_sketch_inner).extrude(-(EW + 2*CT - CT)))
-
-    # Side walls wrap outside base
-    cover_outer = cover_outer.translate((0, 0, -CT))
-    cover_inner = cover_inner.translate((0, 0, -CT))
-
-    # Compression channels — one per compartment, grips lip segments
-    comp_channel = dummy
-    for comp_bot, comp_top in [(COMP_BOT_BOT, COMP_BOT_TOP),
-                                (COMP_MID_BOT, COMP_MID_TOP),
-                                (COMP_TOP_BOT, COMP_TOP_TOP)]:
-        seg_h = (comp_top - comp_bot) - CG
-        ch = (cq.Workplane("XY")
-            .box(CL + CG*2, seg_h, EW - 2*CT)
-            .translate((STEP_X + CG + CL/2,
-                        (comp_bot + comp_top)/2,
-                        EW/2)))
-        comp_channel = comp_channel.union(ch)
-
-    # ======================== Terminal block cutouts on cover front face ==================
-    # Bottom compartment: 2-port input terminal
-    pi = c.power_input
-    input_term_y = (COMP_BOT_BOT + COMP_BOT_TOP) / 2
-    input_terminal_cutout = (cq.Workplane("XY")
+    # Matching terminal cutouts on cover plate (for terminal access)
+    cover_input_cutout = (cq.Workplane("XY")
         .box(CT + 2, pi.height + 1, pi.width + 1)
-        .translate((TOTAL_DEPTH + CT, input_term_y, EW/2)))
-
-    # Top compartment: 6-port output terminal
-    po = c.power_output
-    output_term_y = (COMP_TOP_BOT + COMP_TOP_TOP) / 2
-    output_terminal_cutout = (cq.Workplane("XY")
+        .translate((TOTAL_DEPTH + CT/2, input_term_y, EW/2)))
+    cover_output_cutout = (cq.Workplane("XY")
         .box(CT + 2, po.height + 1, po.width + 1)
-        .translate((TOTAL_DEPTH + CT, output_term_y, EW/2)))
+        .translate((TOTAL_DEPTH + CT/2, output_term_y, EW/2)))
 
-    # ESP32 mounting inside cover — in MIDDLE compartment
-    esp32_mount_y = COMP_MID_BOT + 2
-    esp32_carriers = (cq.Workplane("XY")
-        .pushPoints([
-            (STEP_X + CG + CT + 5, esp32_mount_y + 1),
-            (STEP_X + CG + CT + 5, esp32_mount_y + c.esp32.length - 1)
-        ])
-        .rect(7, 2)
-        .extrude(c.esp32.mount_height)
-        .translate((0, 0, EW/2 - c.esp32.board_width/2)))
-
-    # USB cutout on front face
-    USB_W = 9.3
-    USB_H = 3.3
+    # Matching USB cutout on cover plate
     if c.esp32.usb_height is not None:
-        usb_cutout = (cq.Workplane("ZY",
-            (TOTAL_DEPTH + CT,
+        cover_usb_cutout = (cq.Workplane("ZY",
+            (TOTAL_DEPTH + CT + 0.1,
              esp32_mount_y + c.esp32.length/2,
              EW/2))
             .moveTo(0, USB_H/2)
@@ -486,53 +514,25 @@ def generate_enclosure(c: SK120Config):
             .threePointArc((-USB_W/2, 0), (-USB_W/2 + USB_H/2, USB_H/2))
             .hLine(USB_W/2 - USB_H/2)
             .close()
-            .extrude(-CT - 1, taper=-30))
+            .extrude(-CT - 1))
     else:
-        usb_cutout = dummy
+        cover_usb_cutout = dummy
 
-    # Fan on top of cover (LOW section top), biased toward rear
-    fan_x = STEP_X + CG + CT + c.fan_offset_from_rear + c.fan.size/2
-    fan_z = EW / 2
-    low_section_x_span = TOTAL_DEPTH - STEP_X - 2*CT
-
-    can_fit_fan = (c.fan.size <= low_section_x_span and c.fan.size <= EW - 2*CT)
-    if can_fit_fan:
-        fan_cutout = (cq.Workplane("XY", (fan_x, LOW_TOP_Y + CT, fan_z))
-            .rect(c.fan.size, c.fan.size)
+    # Cover screw holes (pass-through for screws into base inserts)
+    cover_screw_holes = dummy
+    for sy in cover_screw_y_positions:
+        hole = (cq.Workplane("XY", (TOTAL_DEPTH + CT + 0.1, sy, EW/2))
+            .circle(COVER_SCREW_DIAM / 2)
             .extrude(-CT - 2))
-        fan_screw_cutout = dummy
-        hs = c.fan.screw_spacing / 2
-        for dx in [-hs, hs]:
-            for dz in [-hs, hs]:
-                hole = (cq.Workplane("XY", (fan_x + dx, LOW_TOP_Y + CT + 0.1, fan_z + dz))
-                    .circle(c.fan.screw_diam / 2)
-                    .extrude(-CT - 2))
-                fan_screw_cutout = fan_screw_cutout.union(hole)
-    else:
-        fan_cutout       = dummy
-        fan_screw_cutout = dummy
-
-    # Front face ventilation
-    cover_vents = dummy
-    for bi in range(c.num_boards):
-        vy = board_y_positions[bi] + sk.pcb_thickness + sk.component_height/2
-        if LOW_BOT_Y < vy < LOW_TOP_Y:
-            vent = (cq.Workplane("XY")
-                .box(CT + 2, sk.component_height * 0.4, VENT_WIDTH)
-                .translate((TOTAL_DEPTH + CT, vy, EW/2)))
-            cover_vents = cover_vents.union(vent)
+        cover_screw_holes = cover_screw_holes.union(hole)
 
     # ======================== Build COVER ==================
 
-    cover = (cover_outer.cut(cover_inner)
-        .cut(comp_channel)
-        .union(esp32_carriers)
-        .cut(usb_cutout)
-        .cut(input_terminal_cutout)
-        .cut(output_terminal_cutout)
-        .cut(fan_cutout)
-        .cut(fan_screw_cutout)
-        .cut(cover_vents)
+    cover = (cover
+        .cut(cover_input_cutout)
+        .cut(cover_output_cutout)
+        .cut(cover_usb_cutout)
+        .cut(cover_screw_holes)
     )
 
     # ================================= Export ======================
